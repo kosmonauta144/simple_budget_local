@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Domowy budżet</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main class="page-shell">
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="Domowy budżet">
+        <span class="brand-mark">+</span>
+        <span>domowy<br><strong>budżet</strong></span>
+      </a>
+      <span class="storage-status"><span class="status-dot"></span> zapis lokalny · SQLite</span>
+    </header>
+
+    <section class="intro">
+      <div>
+        <p class="eyebrow">Miesięczny przegląd <span id="current-month"></span></p>
+        <h1>Świadomie<br><em>wydawaj.</em></h1>
+      </div>
+      <div class="intro-note">Każdy wydatek zapisuje się<br>w Twojej lokalnej bazie danych.</div>
+    </section>
+
+    <section class="dashboard-grid">
+      <article class="panel add-panel">
+        <div class="panel-heading">
+          <span class="panel-index">02</span>
+          <h2>Dodaj wydatek</h2>
+        </div>
+        <form id="expense-form">
+          <label>Na co?<input name="name" type="text" placeholder="np. zakupy spożywcze" required maxlength="80"></label>
+          <label>Kategoria
+            <select name="category" required>
+              <option value="" disabled selected>Wybierz kategorię</option>
+              <option>Dom</option>
+              <option>Jedzenie</option>
+              <option>Transport</option>
+              <option>Zdrowie</option>
+              <option>Rozrywka</option>
+              <option>Słodycze</option>
+              <option>Ubrania</option>
+              <option>Inne</option>
+            </select>
+          </label>
+          <label>Data<input name="date" type="date" required></label>
+          <label>Kwota
+            <div class="amount-input"><input name="amount" type="number" min="0.01" step="0.01" placeholder="0,00" required><span>PLN</span></div>
+          </label>
+          <button class="primary-button" type="submit">Zapisz wydatek <span>↗</span></button>
+          <p class="form-message" id="form-message" aria-live="polite"></p>
+        </form>
+      </article>
+
+      <article class="panel total-panel">
+        <div class="panel-heading">
+          <span class="panel-index">03</span>
+          <h2>Wydano łącznie</h2>
+        </div>
+        <div class="total-value"><span id="total-amount">0,00</span><small>PLN</small></div>
+        <div class="total-rule"></div>
+        <p class="muted">Suma wszystkich zapisanych wydatków</p>
+      </article>
+
+      <article class="panel income-panel">
+        <div class="panel-heading">
+          <span class="panel-index">04</span>
+          <h2>Miesięczny przychód</h2>
+        </div>
+        <div class="income-total"><span id="income-amount">0,00</span><small>PLN łącznie</small></div>
+        <div id="income-list" class="income-list"><p class="empty-state">Dodaj pierwszy przychód poniżej.</p></div>
+        <form id="income-form" class="income-form">
+          <label>Nazwa przychodu<input id="income-name" name="name" type="text" placeholder="np. wynagrodzenie" maxlength="80" required></label>
+          <label>Kwota
+            <div class="amount-input"><input id="income-input" name="amount" type="number" min="0.01" step="0.01" placeholder="0,00" required><span>PLN</span></div>
+          </label>
+          <div class="income-actions"><button id="income-submit" class="primary-button" type="submit">Dodaj przychód <span>↗</span></button><button id="cancel-income" class="cancel-button" type="button" hidden>Anuluj</button></div>
+          <p class="form-message" id="income-message" aria-live="polite"></p>
+        </form>
+        <p class="income-note">Kwota używana jako stały miesięczny punkt odniesienia.</p>
+      </article>
+
+      <article class="panel income-panel recurring-panel">
+        <div class="panel-heading">
+          <span class="panel-index">05</span>
+          <h2>Stałe wydatki</h2>
+        </div>
+        <div class="income-total"><span id="recurring-total">0,00</span><small>PLN miesięcznie</small></div>
+        <div id="recurring-list" class="income-list"><p class="empty-state">Dodaj pierwszy stały wydatek poniżej.</p></div>
+        <form id="recurring-form" class="income-form">
+          <label>Nazwa wydatku<input id="recurring-name" name="name" type="text" placeholder="np. rata kredytu" maxlength="80" required></label>
+          <label>Kwota
+            <div class="amount-input"><input id="recurring-input" name="amount" type="number" min="0.01" step="0.01" placeholder="0,00" required><span>PLN</span></div>
+          </label>
+          <div class="income-actions"><button id="recurring-submit" class="primary-button" type="submit">Dodaj wydatek <span>↗</span></button><button id="cancel-recurring" class="cancel-button" type="button" hidden>Anuluj</button></div>
+          <p class="form-message" id="recurring-message" aria-live="polite"></p>
+        </form>
+        <p class="income-note">Stałe zobowiązania powtarzające się co miesiąc.</p>
+      </article>
+
+      <article class="panel insights-panel">
+          <div class="panel-heading">
+            <span class="panel-index">01</span>
+            <h2>Struktura budżetu</h2>
+          </div>
+          <div class="insights-layout">
+            <div class="pie-chart" id="pie-chart" aria-label="Wykres wydatków i oszczędności"><span id="chart-center">0%</span><small>oszczędności</small></div>
+            <div id="chart-legend" class="chart-legend"><p class="empty-state">Dodaj wydatki, aby zobaczyć strukturę.</p></div>
+            <div class="savings-box">
+              <span class="savings-label">Prognozowane oszczędności</span>
+              <strong id="projected-savings">0,00 zł</strong>
+              <span class="savings-description">przychody − stałe wydatki − wydatki dodane</span>
+            </div>
+          </div>
+      </article>
+
+      <article class="panel category-panel">
+        <div class="panel-heading">
+          <span class="panel-index">06</span>
+          <h2>Według kategorii</h2>
+        </div>
+        <div id="category-list" class="category-list"><p class="empty-state">Brak wydatków. Dodaj pierwszy powyżej.</p></div>
+      </article>
+
+      <article class="panel history-panel">
+        <div class="panel-heading history-heading">
+          <div><span class="panel-index">07</span><h2>Ostatnie wydatki</h2></div>
+          <span id="expense-count" class="count-badge">0</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Opis</th><th>Kategoria</th><th>Data</th><th>Kwota</th><th></th></tr></thead>
+            <tbody id="expense-list"><tr><td colspan="5" class="empty-state">Twoja historia jest pusta.</td></tr></tbody>
+          </table>
+        </div>
+      </article>
+    </section>
+    <footer><span>DOMOWY BUDŻET</span><span>DANE PRZECHOWYWANE LOKALNIE</span></footer>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>
