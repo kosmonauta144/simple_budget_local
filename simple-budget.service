@@ -1,0 +1,16 @@
+[Unit]
+Description=Simple Budget local web server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=marabir
+Group=marabir
+WorkingDirectory=/home/marabir/budget/simple_budget_local
+ExecStart=/usr/bin/python3 /home/marabir/budget/simple_budget_local/server.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

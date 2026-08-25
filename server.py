@@ -269,8 +269,8 @@ class BudgetHandler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     initialize_database()
-    server = ThreadingHTTPServer(("127.0.0.1", 8000), BudgetHandler)
-    print("Budget dashboard running at http://127.0.0.1:8000")
+    server = ThreadingHTTPServer(("0.0.0.0", 8000), BudgetHandler)
+    print("Budget dashboard running on port 8000")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
