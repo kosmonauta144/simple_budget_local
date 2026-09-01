@@ -1,6 +1,6 @@
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
 import json
 import sqlite3
 from datetime import date
@@ -85,6 +85,56 @@ def get_dashboard_data():
     }
 
 
+def get_month_start_end(year, month):
+    """Get start and end dates for a given month"""
+    month_start = date(year, month, 1)
+    if month == 12:
+        month_end = date(year + 1, 1, 1)
+    else:
+        month_end = date(year, month + 1, 1)
+    return month_start, month_end
+
+
+def get_dashboard_data_for_month(year, month):
+    """Get dashboard data filtered for a specific month"""
+    month_start, month_end = get_month_start_end(year, month)
+    
+    with get_connection() as connection:
+        expenses = connection.execute(
+            "SELECT id, name, category, amount, expense_date, created_at FROM expenses WHERE expense_date >= ? AND expense_date < ? ORDER BY expense_date DESC, id DESC",
+            (str(month_start), str(month_end))
+        ).fetchall()
+        categories = connection.execute(
+            """
+            SELECT category, SUM(amount) AS total, COUNT(*) AS count
+            FROM expenses
+            WHERE expense_date >= ? AND expense_date < ?
+            GROUP BY category
+            ORDER BY total DESC, category ASC
+            """,
+            (str(month_start), str(month_end))
+        ).fetchall()
+        total = connection.execute(
+            "SELECT COALESCE(SUM(amount), 0) FROM expenses WHERE expense_date >= ? AND expense_date < ?",
+            (str(month_start), str(month_end))
+        ).fetchone()[0]
+        incomes = connection.execute("SELECT id, name, amount FROM incomes ORDER BY id ASC").fetchall()
+        income = sum(item["amount"] for item in incomes)
+        recurring_expenses = connection.execute("SELECT id, name, amount FROM recurring_expenses ORDER BY id ASC").fetchall()
+        recurring_total = sum(item["amount"] for item in recurring_expenses)
+
+    return {
+        "expenses": [dict(expense) for expense in expenses],
+        "categories": [dict(category) for category in categories],
+        "total": total,
+        "income": income,
+        "incomes": [dict(item) for item in incomes],
+        "recurring_expenses": [dict(item) for item in recurring_expenses],
+        "recurring_total": recurring_total,
+        "projected_savings": income - recurring_total - total,
+    }
+
+
 class BudgetHandler(BaseHTTPRequestHandler):
     def send_json(self, payload, status=200):
         body = json.dumps(payload).encode("utf-8")
@@ -96,8 +146,23 @@ class BudgetHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = urlparse(self.path).path
+        query = urlparse(self.path).query
+        
         if path == "/api/dashboard":
-            self.send_json(get_dashboard_data())
+            # Parse month parameter if provided (format: YYYY-MM)
+            params = parse_qs(query)
+            month_param = params.get('month', [None])[0]
+            
+            if month_param:
+                try:
+                    year, month = map(int, month_param.split('-'))
+                    dashboard_data = get_dashboard_data_for_month(year, month)
+                except (ValueError, IndexError):
+                    dashboard_data = get_dashboard_data()
+            else:
+                dashboard_data = get_dashboard_data()
+            
+            self.send_json(dashboard_data)
             return
 
         if path in ("/", "/index.html"):

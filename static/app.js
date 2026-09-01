@@ -30,8 +30,35 @@ const projectedSavings = document.querySelector('#projected-savings');
 const chartCenter = document.querySelector('#chart-center');
 const chartColors = ['#e7765d', '#1f6b4d', '#d2ad5d', '#6d8990', '#b36b85', '#7c8b52', '#c48a57', '#3f6f72'];
 
+// Month selection state
+let selectedMonth = new Date();
+
+const prevMonthButton = document.querySelector('#prev-month');
+const nextMonthButton = document.querySelector('#next-month');
+const selectedMonthDisplay = document.querySelector('#selected-month');
+
 document.querySelector('#current-month').textContent = new Intl.DateTimeFormat('pl-PL', { month: 'long', year: 'numeric' }).format(new Date());
 dateInput.value = new Date().toISOString().slice(0, 10);
+
+function updateMonthDisplay() {
+  selectedMonthDisplay.textContent = new Intl.DateTimeFormat('pl-PL', { month: 'long', year: 'numeric' }).format(selectedMonth);
+}
+
+function getMonthString(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+}
+
+prevMonthButton.addEventListener('click', () => {
+  selectedMonth = new Date(selectedMonth.getFullYear(), selectedMonth.getMonth() - 1, 1);
+  updateMonthDisplay();
+  loadDashboard(selectedMonth);
+});
+
+nextMonthButton.addEventListener('click', () => {
+  selectedMonth = new Date(selectedMonth.getFullYear(), selectedMonth.getMonth() + 1, 1);
+  updateMonthDisplay();
+  loadDashboard(selectedMonth);
+});
 
 function formatAmount(cents) {
   return currency.format(cents / 100);
@@ -206,8 +233,9 @@ function escapeHtml(value) {
   return String(value).replace(/[&<>'"]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#039;', '"': '&quot;' })[character]);
 }
 
-async function loadDashboard() {
-  const response = await fetch('/api/dashboard');
+async function loadDashboard(monthDate = new Date()) {
+  const monthString = getMonthString(monthDate);
+  const response = await fetch(`/api/dashboard?month=${monthString}`);
   window.dashboardData = await response.json();
   renderDashboard(window.dashboardData);
 }
@@ -227,8 +255,9 @@ form.addEventListener('submit', async (event) => {
     return;
   }
   form.reset();
+  dateInput.value = new Date().toISOString().slice(0, 10);
   formMessage.textContent = 'Zapisano.';
-  renderDashboard(data);
+  loadDashboard(selectedMonth);
   setTimeout(() => { formMessage.textContent = ''; }, 2200);
 });
 
@@ -236,7 +265,8 @@ expenseList.addEventListener('click', async (event) => {
   const button = event.target.closest('.delete-button');
   if (!button) return;
   const response = await fetch(`/api/expenses/${button.dataset.id}`, { method: 'DELETE' });
-  if (response.ok) renderDashboard(await response.json());
+  if (response.ok) loadDashboard(selectedMonth);
 });
 
 loadDashboard().catch(() => { formMessage.textContent = 'Nie udało się połączyć z bazą danych.'; });
+updateMonthDisplay();

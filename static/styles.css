@@ -21,6 +21,10 @@ body:before { content: ""; position: fixed; inset: 0; opacity: .18; pointer-even
 .status-dot { display: inline-block; width: 7px; height: 7px; margin-right: 7px; border-radius: 50%; background: var(--green); }
 .intro { align-items: end; padding: 90px 0 52px; }
 .eyebrow { margin: 0 0 12px; color: var(--green); font-family: "DM Mono", monospace; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+.month-selector { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
+.month-selector button { border: 0; padding: 6px 12px; cursor: pointer; background: var(--green); color: white; font: 12px "Space Grotesk", sans-serif; border-radius: 3px; transition: background .2s; }
+.month-selector button:hover { background: #174f3a; }
+.month-selector span { color: var(--ink); font: 13px "Space Grotesk", sans-serif; min-width: 120px; text-align: center; }
 h1 { margin: 0; font-size: clamp(3.8rem, 8vw, 7rem); line-height: .84; letter-spacing: -.06em; font-weight: 600; }
 h1 em { color: var(--coral); font-style: normal; }
 .intro-note { border-left: 2px solid var(--coral); padding-left: 14px; margin-bottom: 7px; color: var(--muted); font-size: 13px; line-height: 1.5; }
