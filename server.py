@@ -3,6 +3,7 @@ from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 import json
 import sqlite3
+import uuid
 from datetime import date
 
 ROOT = Path(__file__).parent
@@ -49,8 +50,21 @@ def initialize_database():
                 category TEXT NOT NULL DEFAULT 'Inne',
                 amount INTEGER NOT NULL CHECK (amount >= 0),
                 payment_deadline INTEGER CHECK (payment_deadline IS NULL OR payment_deadline BETWEEN 1 AND 31),
-                is_paid INTEGER NOT NULL DEFAULT 0 CHECK (is_paid IN (0, 1))
+                month TEXT NOT NULL DEFAULT '',
+                is_paid INTEGER NOT NULL DEFAULT 0 CHECK (is_paid IN (0, 1)),
+                template_id TEXT
             )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TRIGGER IF NOT EXISTS recurring_expenses_default_month
+            AFTER INSERT ON recurring_expenses
+            BEGIN
+                UPDATE recurring_expenses
+                SET month = strftime('%Y-%m', 'now')
+                WHERE id = NEW.id AND (month IS NULL OR month = '');
+            END;
             """
         )
         legacy_income = connection.execute("SELECT amount FROM settings WHERE key = 'monthly_income'").fetchone()[0]
@@ -68,48 +82,74 @@ def initialize_database():
             connection.execute("UPDATE recurring_expenses SET category = 'Inne' WHERE category IS NULL OR category = ''")
         if "payment_deadline" not in recurring_columns:
             connection.execute("ALTER TABLE recurring_expenses ADD COLUMN payment_deadline INTEGER CHECK (payment_deadline IS NULL OR payment_deadline BETWEEN 1 AND 31)")
+        if "month" not in recurring_columns:
+            connection.execute("ALTER TABLE recurring_expenses ADD COLUMN month TEXT NOT NULL DEFAULT ''")
+            connection.execute("UPDATE recurring_expenses SET month = strftime('%Y-%m', 'now') WHERE month IS NULL OR month = ''")
         if "is_paid" not in recurring_columns:
             connection.execute("ALTER TABLE recurring_expenses ADD COLUMN is_paid INTEGER NOT NULL DEFAULT 0 CHECK (is_paid IN (0, 1))")
+        if "template_id" not in recurring_columns:
+            connection.execute("ALTER TABLE recurring_expenses ADD COLUMN template_id TEXT")
+        connection.execute("UPDATE recurring_expenses SET month = strftime('%Y-%m', 'now') WHERE month IS NULL OR month = ''")
 
 
 def get_dashboard_data():
-    with get_connection() as connection:
-        expenses = connection.execute(
-            "SELECT id, name, category, amount, expense_date, created_at FROM expenses ORDER BY expense_date DESC, id DESC"
-        ).fetchall()
-        categories = connection.execute(
-            """
-            SELECT category, SUM(amount) AS total, COUNT(*) AS count
-            FROM expenses
-            GROUP BY category
-            ORDER BY total DESC, category ASC
-            """
-        ).fetchall()
-        total = connection.execute("SELECT COALESCE(SUM(amount), 0) FROM expenses").fetchone()[0]
-        incomes = connection.execute("SELECT id, name, amount FROM incomes ORDER BY id ASC").fetchall()
-        income = sum(item["amount"] for item in incomes)
-        recurring_expenses = connection.execute("SELECT id, name, category, amount, payment_deadline, is_paid FROM recurring_expenses ORDER BY id ASC").fetchall()
-        recurring_categories = connection.execute(
-            """
-            SELECT category, SUM(amount) AS total, COUNT(*) AS count
-            FROM recurring_expenses
-            GROUP BY category
-            ORDER BY total DESC, category ASC
-            """
-        ).fetchall()
-        recurring_total = sum(item["amount"] for item in recurring_expenses)
+    today = date.today()
+    return get_dashboard_data_for_month(today.year, today.month)
 
-    return {
-        "expenses": [dict(expense) for expense in expenses],
-        "categories": [dict(category) for category in categories],
-        "total": total,
-        "income": income,
-        "incomes": [dict(item) for item in incomes],
-        "recurring_expenses": [dict(item) for item in recurring_expenses],
-        "recurring_categories": [dict(item) for item in recurring_categories],
-        "recurring_total": recurring_total,
-        "projected_savings": income - recurring_total - total,
-    }
+
+def month_key_for(year, month):
+    return f"{year:04d}-{month:02d}"
+
+
+def iter_month_keys(start_month, count=120):
+    year, month = map(int, start_month.split('-'))
+    for _ in range(count):
+        yield month_key_for(year, month)
+        month += 1
+        if month == 13:
+            month = 1
+            year += 1
+
+
+def propagate_future_recurring_expenses(template_id, start_month, count=120):
+    with get_connection() as connection:
+        source_row = connection.execute(
+            "SELECT name, category, amount, payment_deadline, is_paid FROM recurring_expenses WHERE template_id = ? AND month = ? LIMIT 1",
+            (template_id, start_month),
+        ).fetchone()
+        if source_row is None:
+            return
+
+        existing_months = {
+            row[0] for row in connection.execute(
+                "SELECT month FROM recurring_expenses WHERE template_id = ?",
+                (template_id,),
+            ).fetchall()
+        }
+
+        for month_key in iter_month_keys(start_month, count):
+            if month_key in existing_months:
+                continue
+            connection.execute(
+                "INSERT INTO recurring_expenses (name, category, amount, payment_deadline, month, is_paid, template_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    source_row["name"],
+                    source_row["category"],
+                    source_row["amount"],
+                    source_row["payment_deadline"],
+                    month_key,
+                    source_row["is_paid"],
+                    template_id,
+                ),
+            )
+
+
+def delete_future_recurring_expenses(template_id, cutoff_month):
+    with get_connection() as connection:
+        connection.execute(
+            "DELETE FROM recurring_expenses WHERE template_id = ? AND month >= ?",
+            (template_id, cutoff_month),
+        )
 
 
 def get_month_start_end(year, month):
@@ -147,14 +187,20 @@ def get_dashboard_data_for_month(year, month):
         ).fetchone()[0]
         incomes = connection.execute("SELECT id, name, amount FROM incomes ORDER BY id ASC").fetchall()
         income = sum(item["amount"] for item in incomes)
-        recurring_expenses = connection.execute("SELECT id, name, category, amount, payment_deadline, is_paid FROM recurring_expenses ORDER BY id ASC").fetchall()
+        month_key = f"{year:04d}-{month:02d}"
+        recurring_expenses = connection.execute(
+            "SELECT id, name, category, amount, payment_deadline, is_paid FROM recurring_expenses WHERE month = ? ORDER BY id ASC",
+            (month_key,),
+        ).fetchall()
         recurring_categories = connection.execute(
             """
             SELECT category, SUM(amount) AS total, COUNT(*) AS count
             FROM recurring_expenses
+            WHERE month = ?
             GROUP BY category
             ORDER BY total DESC, category ASC
-            """
+            """,
+            (month_key,),
         ).fetchall()
         recurring_total = sum(item["amount"] for item in recurring_expenses)
 
@@ -236,6 +282,12 @@ class BudgetHandler(BaseHTTPRequestHandler):
                     payment_deadline = int(payment_deadline_raw)
                     if not 1 <= payment_deadline <= 31:
                         raise ValueError
+                month = str(data.get("month", "") or date.today().strftime("%Y-%m")).strip()
+                if len(month) != 7 or month[4] != '-':
+                    raise ValueError
+                year, month_number = map(int, month.split('-'))
+                if not 1 <= month_number <= 12:
+                    raise ValueError
                 if not name or not category or amount <= 0:
                     raise ValueError
                 amount_in_cents = round(amount * 100)
@@ -243,12 +295,14 @@ class BudgetHandler(BaseHTTPRequestHandler):
                 self.send_json({"error": "Podaj nazwę, kategorię, kwotę stałego wydatku większą od zera oraz termin płatności od 1 do 31."}, 400)
                 return
 
+            template_id = uuid.uuid4().hex
             with get_connection() as connection:
                 connection.execute(
-                    "INSERT INTO recurring_expenses (name, category, amount, payment_deadline, is_paid) VALUES (?, ?, ?, ?, ?)",
-                    (name, category, amount_in_cents, payment_deadline, 0),
+                    "INSERT INTO recurring_expenses (name, category, amount, payment_deadline, month, is_paid, template_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (name, category, amount_in_cents, payment_deadline, month, 0, template_id),
                 )
-            self.send_json(get_dashboard_data(), 201)
+            propagate_future_recurring_expenses(template_id, month)
+            self.send_json(get_dashboard_data_for_month(year, month_number), 201)
             return
 
         if path == "/api/incomes":
@@ -314,6 +368,12 @@ class BudgetHandler(BaseHTTPRequestHandler):
                 is_paid = data.get("is_paid")
                 if is_paid is not None:
                     is_paid = 1 if bool(is_paid) else 0
+                month = str(data.get("month", "") or date.today().strftime("%Y-%m")).strip()
+                if len(month) != 7 or month[4] != '-':
+                    raise ValueError
+                year, month_number = map(int, month.split('-'))
+                if not 1 <= month_number <= 12:
+                    raise ValueError
                 if not name or not category or amount <= 0:
                     raise ValueError
                 amount_in_cents = round(amount * 100)
@@ -322,10 +382,10 @@ class BudgetHandler(BaseHTTPRequestHandler):
                 return
             with get_connection() as connection:
                 connection.execute(
-                    "UPDATE recurring_expenses SET name = ?, category = ?, amount = ?, payment_deadline = ?, is_paid = COALESCE(?, is_paid) WHERE id = ?",
-                    (name, category, amount_in_cents, payment_deadline, is_paid, expense_id),
+                    "UPDATE recurring_expenses SET name = ?, category = ?, amount = ?, payment_deadline = ?, month = ?, is_paid = COALESCE(?, is_paid) WHERE id = ?",
+                    (name, category, amount_in_cents, payment_deadline, month, is_paid, expense_id),
                 )
-            self.send_json(get_dashboard_data())
+            self.send_json(get_dashboard_data_for_month(year, month_number))
             return
 
         if not path.startswith("/api/incomes/"):
@@ -371,8 +431,13 @@ class BudgetHandler(BaseHTTPRequestHandler):
 
         is_paid = 1 if bool(data.get("is_paid")) else 0
         with get_connection() as connection:
+            month = connection.execute("SELECT month FROM recurring_expenses WHERE id = ?", (expense_id,)).fetchone()
             connection.execute("UPDATE recurring_expenses SET is_paid = ? WHERE id = ?", (is_paid, expense_id))
-        self.send_json(get_dashboard_data())
+        if month and month[0]:
+            year, month_number = map(int, month[0].split('-'))
+            self.send_json(get_dashboard_data_for_month(year, month_number))
+        else:
+            self.send_json(get_dashboard_data())
 
     def do_DELETE(self):
         path = urlparse(self.path).path
@@ -383,8 +448,16 @@ class BudgetHandler(BaseHTTPRequestHandler):
                 self.send_json({"error": "Invalid recurring expense id"}, 400)
                 return
             with get_connection() as connection:
-                connection.execute("DELETE FROM recurring_expenses WHERE id = ?", (expense_id,))
-            self.send_json(get_dashboard_data())
+                row = connection.execute("SELECT month, template_id FROM recurring_expenses WHERE id = ?", (expense_id,)).fetchone()
+                if row and row["template_id"]:
+                    delete_future_recurring_expenses(row["template_id"], row["month"])
+                else:
+                    connection.execute("DELETE FROM recurring_expenses WHERE id = ?", (expense_id,))
+            if row:
+                year, month_value = map(int, row["month"].split('-'))
+                self.send_json(get_dashboard_data_for_month(year, month_value))
+            else:
+                self.send_json(get_dashboard_data())
             return
         if path.startswith("/api/incomes/"):
             try:

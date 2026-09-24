@@ -234,7 +234,7 @@ recurringForm.addEventListener('submit', async (event) => {
   const response = await fetch(editingRecurringId ? `/api/recurring-expenses/${editingRecurringId}` : '/api/recurring-expenses', {
     method: editingRecurringId ? 'PUT' : 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: recurringName.value, category: recurringCategory.value, payment_deadline: recurringDeadline.value, amount: recurringInput.value }),
+    body: JSON.stringify({ name: recurringName.value, category: recurringCategory.value, payment_deadline: recurringDeadline.value, month: getMonthString(selectedMonth), amount: recurringInput.value }),
   });
   const data = await response.json();
   if (!response.ok) {
