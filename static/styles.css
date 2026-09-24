@@ -53,9 +53,12 @@ select { cursor: pointer; }
 .income-total { margin: 27px 0 20px; color: var(--green); font-size: clamp(2.5rem, 4vw, 4rem); letter-spacing: -.07em; line-height: .9; white-space: nowrap; }
 .income-total small { margin-left: 6px; color: var(--coral); font: 11px "DM Mono", monospace; letter-spacing: .04em; }
 .income-list { margin-bottom: 22px; }
-.income-row { display: grid; grid-template-columns: 1fr auto auto auto; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); font-size: 12px; }
+.income-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); font-size: 12px; }
+.income-row > .paid-toggle { display: inline-flex; align-items: center; gap: 8px; min-width: 110px; color: var(--muted); }
+.income-row > .paid-toggle input { width: auto; margin: 0; }
+.income-row > span { flex: 1 1 auto; min-width: 0; }
 .income-row strong { color: var(--green); font: 11px "DM Mono", monospace; }
-.income-row .delete-button { padding-left: 0; }
+.income-row .delete-button { padding-left: 0; margin-left: 4px; }
 .edit-button, .cancel-button { border: 0; padding: 5px 0; cursor: pointer; background: transparent; color: var(--green); font: 11px "DM Mono", monospace; text-transform: uppercase; }
 .edit-button { border-bottom: 1px solid var(--green); }
 .income-form { border-top: 1px solid var(--line); padding-top: 18px; }
