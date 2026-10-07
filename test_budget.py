@@ -43,6 +43,21 @@ class RecurringExpenseCategoryTests(unittest.TestCase):
         self.assertEqual(dashboard["recurring_expenses"][0]["category"], "Dom")
         self.assertEqual(dashboard["recurring_total"], 25000)
 
+    def test_recurring_categories_are_marked_as_fixed_costs(self):
+        with sqlite3.connect(server.DB_PATH) as connection:
+            connection.executemany(
+                "INSERT INTO recurring_expenses (name, category, amount, month, is_paid) VALUES (?, ?, ?, ?, ?)",
+                [
+                    ("Internet", "Media", 9900, "2026-09", 0),
+                    ("Rata kredytu", "Dom", 25000, "2026-09", 1),
+                ],
+            )
+            connection.commit()
+
+        dashboard = server.get_dashboard_data_for_month(2026, 9)
+        self.assertIn("Media_stałe", [item["category"] for item in dashboard["recurring_categories"]])
+        self.assertIn("Dom_stałe", [item["category"] for item in dashboard["recurring_categories"]])
+
     def test_recurring_expense_payment_deadline_is_saved_and_loaded(self):
         with sqlite3.connect(server.DB_PATH) as connection:
             connection.execute(

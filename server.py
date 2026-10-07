@@ -245,7 +245,11 @@ def get_month_start_end(year, month):
 def get_dashboard_data_for_month(year, month):
     """Get dashboard data filtered for a specific month"""
     month_start, month_end = get_month_start_end(year, month)
-    
+
+    def with_fixed_cost_suffix(category_value):
+        category_name = str(category_value or "Inne").strip() or "Inne"
+        return f"{category_name}_stałe"
+
     with get_connection() as connection:
         expenses = connection.execute(
             "SELECT id, name, category, amount, expense_date, created_at FROM expenses WHERE expense_date >= ? AND expense_date < ? ORDER BY expense_date DESC, id DESC",
@@ -287,6 +291,11 @@ def get_dashboard_data_for_month(year, month):
         ).fetchall()
         recurring_total = sum(item["amount"] for item in recurring_expenses)
 
+    recurring_categories_payload = [
+        {**dict(item), "category": with_fixed_cost_suffix(item["category"])}
+        for item in recurring_categories
+    ]
+
     return {
         "expenses": [dict(expense) for expense in expenses],
         "categories": [dict(category) for category in categories],
@@ -294,7 +303,7 @@ def get_dashboard_data_for_month(year, month):
         "income": income,
         "incomes": [dict(item) for item in incomes],
         "recurring_expenses": [dict(item) for item in recurring_expenses],
-        "recurring_categories": [dict(item) for item in recurring_categories],
+        "recurring_categories": recurring_categories_payload,
         "recurring_total": recurring_total,
         "projected_savings": income - recurring_total - total,
     }
