@@ -115,6 +115,130 @@ class RecurringExpenseCategoryTests(unittest.TestCase):
 
         self.assertEqual(months, ["2026-09"])
 
+    def test_income_is_scoped_to_month(self):
+        with sqlite3.connect(server.DB_PATH) as connection:
+            connection.executemany(
+                "INSERT INTO incomes (name, amount, month, template_id) VALUES (?, ?, ?, ?)",
+                [
+                    ("Wynagrodzenie", 40000, "2026-08", "template-income-old"),
+                    ("Wynagrodzenie", 45000, "2026-09", "template-income-new"),
+                ],
+            )
+            connection.commit()
+
+        dashboard = server.get_dashboard_data_for_month(2026, 9)
+        self.assertEqual(len(dashboard["incomes"]), 1)
+        self.assertEqual(dashboard["incomes"][0]["amount"], 45000)
+        self.assertEqual(dashboard["income"], 45000)
+
+    def test_income_template_is_propagated_to_future_months(self):
+        template_id = "template-income-2026-09"
+        with sqlite3.connect(server.DB_PATH) as connection:
+            connection.execute(
+                "INSERT INTO incomes (name, amount, month, template_id) VALUES (?, ?, ?, ?)",
+                ("Wynagrodzenie", 45000, "2026-09", template_id),
+            )
+            connection.commit()
+
+        server.propagate_future_incomes(template_id, "2026-09")
+
+        with sqlite3.connect(server.DB_PATH) as connection:
+            months = [row[0] for row in connection.execute(
+                "SELECT month FROM incomes WHERE template_id = ? ORDER BY month ASC",
+                (template_id,),
+            ).fetchall()]
+
+        self.assertIn("2026-09", months)
+        self.assertIn("2026-10", months)
+        self.assertIn("2026-11", months)
+
+    def test_removing_a_future_income_template_keeps_previous_months(self):
+        template_id = "template-income-delete-cutoff"
+        with sqlite3.connect(server.DB_PATH) as connection:
+            connection.executemany(
+                "INSERT INTO incomes (name, amount, month, template_id) VALUES (?, ?, ?, ?)",
+                [
+                    ("Wynagrodzenie", 45000, "2026-09", template_id),
+                    ("Wynagrodzenie", 45000, "2026-10", template_id),
+                    ("Wynagrodzenie", 45000, "2026-11", template_id),
+                ],
+            )
+            connection.commit()
+
+        server.delete_future_incomes(template_id, "2026-10")
+
+        with sqlite3.connect(server.DB_PATH) as connection:
+            months = [row[0] for row in connection.execute(
+                "SELECT month FROM incomes WHERE template_id = ? ORDER BY month ASC",
+                (template_id,),
+            ).fetchall()]
+
+        self.assertEqual(months, ["2026-09"])
+
+    def test_editing_recurring_expense_template_updates_future_months_only(self):
+        template_id = "template-edit-expense"
+        with sqlite3.connect(server.DB_PATH) as connection:
+            connection.executemany(
+                "INSERT INTO recurring_expenses (name, category, amount, month, template_id) VALUES (?, ?, ?, ?, ?)",
+                [
+                    ("Internet", "Media", 9900, "2026-09", template_id),
+                    ("Internet", "Media", 9900, "2026-10", template_id),
+                    ("Internet", "Media", 9900, "2026-11", template_id),
+                    ("Internet", "Media", 9900, "2026-08", "older-template"),
+                ],
+            )
+            connection.commit()
+
+        server.update_future_recurring_expenses(
+            template_id,
+            "2026-09",
+            name="Internet",
+            category="Media",
+            amount=15000,
+            payment_deadline=10,
+            is_paid=1,
+        )
+
+        with sqlite3.connect(server.DB_PATH) as connection:
+            amounts = {
+                row[0]: row[1]
+                for row in connection.execute(
+                    "SELECT month, amount FROM recurring_expenses WHERE template_id = ? ORDER BY month ASC",
+                    (template_id,),
+                ).fetchall()
+            }
+            self.assertEqual(amounts["2026-09"], 15000)
+            self.assertEqual(amounts["2026-10"], 15000)
+            self.assertEqual(amounts["2026-11"], 15000)
+
+    def test_editing_income_template_updates_future_months_only(self):
+        template_id = "template-edit-income"
+        with sqlite3.connect(server.DB_PATH) as connection:
+            connection.executemany(
+                "INSERT INTO incomes (name, amount, month, template_id) VALUES (?, ?, ?, ?)",
+                [
+                    ("Wynagrodzenie", 45000, "2026-09", template_id),
+                    ("Wynagrodzenie", 45000, "2026-10", template_id),
+                    ("Wynagrodzenie", 45000, "2026-11", template_id),
+                    ("Wynagrodzenie", 45000, "2026-08", "older-income-template"),
+                ],
+            )
+            connection.commit()
+
+        server.update_future_incomes(template_id, "2026-09", name="Wynagrodzenie", amount=55000)
+
+        with sqlite3.connect(server.DB_PATH) as connection:
+            amounts = {
+                row[0]: row[1]
+                for row in connection.execute(
+                    "SELECT month, amount FROM incomes WHERE template_id = ? ORDER BY month ASC",
+                    (template_id,),
+                ).fetchall()
+            }
+            self.assertEqual(amounts["2026-09"], 55000)
+            self.assertEqual(amounts["2026-10"], 55000)
+            self.assertEqual(amounts["2026-11"], 55000)
+
 
 if __name__ == "__main__":
     unittest.main()

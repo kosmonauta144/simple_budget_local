@@ -40,7 +40,15 @@ def initialize_database():
         )
         connection.execute("INSERT OR IGNORE INTO settings (key, amount) VALUES ('monthly_income', 0)")
         connection.execute(
-            "CREATE TABLE IF NOT EXISTS incomes (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, amount INTEGER NOT NULL CHECK (amount >= 0))"
+            """
+            CREATE TABLE IF NOT EXISTS incomes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                amount INTEGER NOT NULL CHECK (amount >= 0),
+                month TEXT NOT NULL DEFAULT '',
+                template_id TEXT
+            )
+            """
         )
         connection.execute(
             """
@@ -70,11 +78,19 @@ def initialize_database():
         legacy_income = connection.execute("SELECT amount FROM settings WHERE key = 'monthly_income'").fetchone()[0]
         income_count = connection.execute("SELECT COUNT(*) FROM incomes").fetchone()[0]
         if legacy_income and not income_count:
-            connection.execute("INSERT INTO incomes (name, amount) VALUES (?, ?)", ("Miesięczny przychód", legacy_income))
+            connection.execute("INSERT INTO incomes (name, amount, month) VALUES (?, ?, ?)", ("Miesięczny przychód", legacy_income, str(date.today().strftime("%Y-%m"))))
         columns = {row[1] for row in connection.execute("PRAGMA table_info(expenses)")}
         if "expense_date" not in columns:
             connection.execute("ALTER TABLE expenses ADD COLUMN expense_date TEXT")
             connection.execute("UPDATE expenses SET expense_date = substr(created_at, 1, 10) WHERE expense_date IS NULL")
+
+        income_columns = {row[1] for row in connection.execute("PRAGMA table_info(incomes)")}
+        if "month" not in income_columns:
+            connection.execute("ALTER TABLE incomes ADD COLUMN month TEXT NOT NULL DEFAULT ''")
+            connection.execute("UPDATE incomes SET month = strftime('%Y-%m', 'now') WHERE month IS NULL OR month = ''")
+        if "template_id" not in income_columns:
+            connection.execute("ALTER TABLE incomes ADD COLUMN template_id TEXT")
+        connection.execute("UPDATE incomes SET month = strftime('%Y-%m', 'now') WHERE month IS NULL OR month = ''")
 
         recurring_columns = {row[1] for row in connection.execute("PRAGMA table_info(recurring_expenses)")}
         if "category" not in recurring_columns:
@@ -152,6 +168,70 @@ def delete_future_recurring_expenses(template_id, cutoff_month):
         )
 
 
+def propagate_future_incomes(template_id, start_month, count=120):
+    with get_connection() as connection:
+        source_row = connection.execute(
+            "SELECT name, amount FROM incomes WHERE template_id = ? AND month = ? LIMIT 1",
+            (template_id, start_month),
+        ).fetchone()
+        if source_row is None:
+            return
+
+        existing_months = {
+            row[0] for row in connection.execute(
+                "SELECT month FROM incomes WHERE template_id = ?",
+                (template_id,),
+            ).fetchall()
+        }
+
+        for month_key in iter_month_keys(start_month, count):
+            if month_key in existing_months:
+                continue
+            connection.execute(
+                "INSERT INTO incomes (name, amount, month, template_id) VALUES (?, ?, ?, ?)",
+                (
+                    source_row["name"],
+                    source_row["amount"],
+                    month_key,
+                    template_id,
+                ),
+            )
+
+
+def delete_future_incomes(template_id, cutoff_month):
+    with get_connection() as connection:
+        connection.execute(
+            "DELETE FROM incomes WHERE template_id = ? AND month >= ?",
+            (template_id, cutoff_month),
+        )
+
+
+def update_future_recurring_expenses(template_id, month, *, name, category, amount, payment_deadline=None, is_paid=None):
+    with get_connection() as connection:
+        params = [name, category, amount, payment_deadline, is_paid, template_id, month]
+        query = (
+            "UPDATE recurring_expenses "
+            "SET name = ?, category = ?, amount = ?, payment_deadline = ?, is_paid = COALESCE(?, is_paid) "
+            "WHERE template_id = ? AND month >= ?"
+        )
+        if is_paid is None:
+            params = [name, category, amount, payment_deadline, template_id, month]
+            query = (
+                "UPDATE recurring_expenses "
+                "SET name = ?, category = ?, amount = ?, payment_deadline = ? "
+                "WHERE template_id = ? AND month >= ?"
+            )
+        connection.execute(query, params)
+
+
+def update_future_incomes(template_id, month, *, name, amount):
+    with get_connection() as connection:
+        connection.execute(
+            "UPDATE incomes SET name = ?, amount = ? WHERE template_id = ? AND month >= ?",
+            (name, amount, template_id, month),
+        )
+
+
 def get_month_start_end(year, month):
     """Get start and end dates for a given month"""
     month_start = date(year, month, 1)
@@ -185,9 +265,12 @@ def get_dashboard_data_for_month(year, month):
             "SELECT COALESCE(SUM(amount), 0) FROM expenses WHERE expense_date >= ? AND expense_date < ?",
             (str(month_start), str(month_end))
         ).fetchone()[0]
-        incomes = connection.execute("SELECT id, name, amount FROM incomes ORDER BY id ASC").fetchall()
-        income = sum(item["amount"] for item in incomes)
         month_key = f"{year:04d}-{month:02d}"
+        incomes = connection.execute(
+            "SELECT id, name, amount FROM incomes WHERE month = ? ORDER BY id ASC",
+            (month_key,),
+        ).fetchall()
+        income = sum(item["amount"] for item in incomes)
         recurring_expenses = connection.execute(
             "SELECT id, name, category, amount, payment_deadline, is_paid FROM recurring_expenses WHERE month = ? ORDER BY id ASC",
             (month_key,),
@@ -311,16 +394,27 @@ class BudgetHandler(BaseHTTPRequestHandler):
                 data = json.loads(self.rfile.read(length))
                 name = str(data.get("name", "")).strip()
                 amount = float(data.get("amount", 0))
+                month = str(data.get("month", "") or date.today().strftime("%Y-%m")).strip()
+                if len(month) != 7 or month[4] != '-':
+                    raise ValueError
+                year, month_number = map(int, month.split('-'))
+                if not 1 <= month_number <= 12:
+                    raise ValueError
                 if not name or amount <= 0:
                     raise ValueError
                 amount_in_cents = round(amount * 100)
             except (ValueError, TypeError, json.JSONDecodeError):
-                self.send_json({"error": "Podaj nazwę i kwotę przychodu większą od zera."}, 400)
+                self.send_json({"error": "Podaj nazwę, kwotę przychodu większą od zera oraz poprawny miesiąc."}, 400)
                 return
 
+            template_id = uuid.uuid4().hex
             with get_connection() as connection:
-                connection.execute("INSERT INTO incomes (name, amount) VALUES (?, ?)", (name, amount_in_cents))
-            self.send_json(get_dashboard_data(), 201)
+                connection.execute(
+                    "INSERT INTO incomes (name, amount, month, template_id) VALUES (?, ?, ?, ?)",
+                    (name, amount_in_cents, month, template_id),
+                )
+            propagate_future_incomes(template_id, month)
+            self.send_json(get_dashboard_data_for_month(year, month_number), 201)
             return
 
         if path != "/api/expenses":
@@ -380,11 +474,27 @@ class BudgetHandler(BaseHTTPRequestHandler):
             except (ValueError, TypeError, json.JSONDecodeError):
                 self.send_json({"error": "Podaj nazwę, kategorię, kwotę stałego wydatku większą od zera oraz termin płatności od 1 do 31."}, 400)
                 return
+
             with get_connection() as connection:
-                connection.execute(
-                    "UPDATE recurring_expenses SET name = ?, category = ?, amount = ?, payment_deadline = ?, month = ?, is_paid = COALESCE(?, is_paid) WHERE id = ?",
-                    (name, category, amount_in_cents, payment_deadline, month, is_paid, expense_id),
-                )
+                template_row = connection.execute(
+                    "SELECT template_id, month FROM recurring_expenses WHERE id = ?",
+                    (expense_id,),
+                ).fetchone()
+                if template_row and template_row["template_id"]:
+                    update_future_recurring_expenses(
+                        template_row["template_id"],
+                        month,
+                        name=name,
+                        category=category,
+                        amount=amount_in_cents,
+                        payment_deadline=payment_deadline,
+                        is_paid=is_paid,
+                    )
+                else:
+                    connection.execute(
+                        "UPDATE recurring_expenses SET name = ?, category = ?, amount = ?, payment_deadline = ?, month = ?, is_paid = COALESCE(?, is_paid) WHERE id = ?",
+                        (name, category, amount_in_cents, payment_deadline, month, is_paid, expense_id),
+                    )
             self.send_json(get_dashboard_data_for_month(year, month_number))
             return
 
@@ -398,19 +508,37 @@ class BudgetHandler(BaseHTTPRequestHandler):
             data = json.loads(self.rfile.read(length))
             name = str(data.get("name", "")).strip()
             amount = float(data.get("amount", 0))
+            month = str(data.get("month", "") or date.today().strftime("%Y-%m")).strip()
+            if len(month) != 7 or month[4] != '-':
+                raise ValueError
+            year, month_number = map(int, month.split('-'))
+            if not 1 <= month_number <= 12:
+                raise ValueError
             if not name or amount <= 0:
                 raise ValueError
             amount_in_cents = round(amount * 100)
         except (ValueError, TypeError, json.JSONDecodeError):
-            self.send_json({"error": "Podaj nazwę i kwotę przychodu większą od zera."}, 400)
+            self.send_json({"error": "Podaj nazwę, kwotę przychodu większą od zera oraz poprawny miesiąc."}, 400)
             return
 
         with get_connection() as connection:
-            connection.execute(
-                "UPDATE incomes SET name = ?, amount = ? WHERE id = ?",
-                (name, amount_in_cents, income_id),
-            )
-        self.send_json(get_dashboard_data())
+            template_row = connection.execute(
+                "SELECT template_id, month FROM incomes WHERE id = ?",
+                (income_id,),
+            ).fetchone()
+            if template_row and template_row["template_id"]:
+                update_future_incomes(
+                    template_row["template_id"],
+                    month,
+                    name=name,
+                    amount=amount_in_cents,
+                )
+            else:
+                connection.execute(
+                    "UPDATE incomes SET name = ?, amount = ?, month = ? WHERE id = ?",
+                    (name, amount_in_cents, month, income_id),
+                )
+        self.send_json(get_dashboard_data_for_month(year, month_number))
 
     def do_PATCH(self):
         path = urlparse(self.path).path
@@ -466,8 +594,16 @@ class BudgetHandler(BaseHTTPRequestHandler):
                 self.send_json({"error": "Invalid income id"}, 400)
                 return
             with get_connection() as connection:
-                connection.execute("DELETE FROM incomes WHERE id = ?", (income_id,))
-            self.send_json(get_dashboard_data())
+                row = connection.execute("SELECT month, template_id FROM incomes WHERE id = ?", (income_id,)).fetchone()
+                if row and row["template_id"]:
+                    delete_future_incomes(row["template_id"], row["month"])
+                else:
+                    connection.execute("DELETE FROM incomes WHERE id = ?", (income_id,))
+            if row:
+                year, month_value = map(int, row["month"].split('-'))
+                self.send_json(get_dashboard_data_for_month(year, month_value))
+            else:
+                self.send_json(get_dashboard_data())
             return
         if not path.startswith("/api/expenses/"):
             self.send_json({"error": "Not found"}, 404)

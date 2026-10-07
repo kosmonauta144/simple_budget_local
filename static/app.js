@@ -31,6 +31,35 @@ const chartLegend = document.querySelector('#chart-legend');
 const projectedSavings = document.querySelector('#projected-savings');
 const chartCenter = document.querySelector('#chart-center');
 const chartColors = ['#e7765d', '#1f6b4d', '#d2ad5d', '#6d8990', '#b36b85', '#7c8b52', '#c48a57', '#3f6f72'];
+const categoryOptions = [
+  'Dom',
+  'Jedzenie',
+  'Transport',
+  'Zdrowie',
+  'Rozrywka',
+  'Słodycze',
+  'Słone przekąski',
+  'Ubrania',
+  'Prezenty',
+  'Media',
+  'Podróże',
+  'Kosmetyki domowe',
+  'Dziesięcina',
+  'Elektronika domowa',
+  'Inne',
+];
+const expenseCategory = document.querySelector('#expense-category');
+
+function populateCategorySelect(selectElement, selectedValue = '') {
+  if (!selectElement) return;
+
+  selectElement.innerHTML = `
+    <option value="" disabled ${selectedValue ? '' : 'selected'}>Wybierz kategorię</option>
+    ${categoryOptions.map((category) => `
+      <option value="${category}" ${selectedValue === category ? 'selected' : ''}>${category}</option>
+    `).join('')}
+  `;
+}
 
 // Month selection state
 let selectedMonth = new Date();
@@ -41,6 +70,8 @@ const selectedMonthDisplay = document.querySelector('#selected-month');
 
 document.querySelector('#current-month').textContent = new Intl.DateTimeFormat('pl-PL', { month: 'long', year: 'numeric' }).format(new Date());
 dateInput.value = new Date().toISOString().slice(0, 10);
+populateCategorySelect(expenseCategory);
+populateCategorySelect(recurringCategory);
 
 function updateMonthDisplay() {
   selectedMonthDisplay.textContent = new Intl.DateTimeFormat('pl-PL', { month: 'long', year: 'numeric' }).format(selectedMonth);
@@ -160,6 +191,12 @@ function resetIncomeForm() {
   cancelIncome.hidden = true;
 }
 
+function resetExpenseForm() {
+  form.reset();
+  dateInput.value = new Date().toISOString().slice(0, 10);
+  populateCategorySelect(expenseCategory);
+}
+
 incomeList.addEventListener('click', (event) => {
   const editButton = event.target.closest('[data-income-id]');
   const deleteButton = event.target.closest('[data-income-delete]');
@@ -182,7 +219,7 @@ cancelIncome.addEventListener('click', resetIncomeForm);
 function resetRecurringForm() {
   editingRecurringId = null;
   recurringForm.reset();
-  recurringCategory.value = '';
+  populateCategorySelect(recurringCategory);
   recurringDeadline.value = '';
   recurringSubmit.innerHTML = 'Dodaj wydatek <span>↗</span>';
   cancelRecurring.hidden = true;
@@ -251,7 +288,7 @@ incomeForm.addEventListener('submit', async (event) => {
   const response = await fetch(editingIncomeId ? `/api/incomes/${editingIncomeId}` : '/api/incomes', {
     method: editingIncomeId ? 'PUT' : 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: incomeName.value, amount: incomeInput.value }),
+    body: JSON.stringify({ name: incomeName.value, amount: incomeInput.value, month: getMonthString(selectedMonth) }),
   });
   const data = await response.json();
   if (!response.ok) {
@@ -288,8 +325,7 @@ form.addEventListener('submit', async (event) => {
     formMessage.textContent = data.error;
     return;
   }
-  form.reset();
-  dateInput.value = new Date().toISOString().slice(0, 10);
+  resetExpenseForm();
   formMessage.textContent = 'Zapisano.';
   loadDashboard(selectedMonth);
   setTimeout(() => { formMessage.textContent = ''; }, 2200);

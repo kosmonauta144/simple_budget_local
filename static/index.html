@@ -41,21 +41,8 @@
         <form id="expense-form">
           <label>Na co?<input name="name" type="text" placeholder="np. zakupy spożywcze" required maxlength="80"></label>
           <label>Kategoria
-            <select name="category" required>
+            <select id="expense-category" name="category" required>
               <option value="" disabled selected>Wybierz kategorię</option>
-              <option>Dom</option>
-              <option>Jedzenie</option>
-              <option>Transport</option>
-              <option>Zdrowie</option>
-              <option>Rozrywka</option>
-              <option>Słodycze</option>
-              <option>Słone przekąski</option>
-              <option>Ubrania</option>
-              <option>Prezenty</option>
-              <option>Media</option>
-              <option>Podróże</option>
-              <option>Kosmetyki domowe</option>
-              <option>Inne</option>
             </select>
           </label>
           <label>Data<input name="date" type="date" required></label>
@@ -107,19 +94,6 @@
           <label>Kategoria
             <select id="recurring-category" name="category" required>
               <option value="" disabled selected>Wybierz kategorię</option>
-              <option>Dom</option>
-              <option>Jedzenie</option>
-              <option>Transport</option>
-              <option>Zdrowie</option>
-              <option>Rozrywka</option>
-              <option>Słodycze</option>
-              <option>Słone przekąski</option>
-              <option>Ubrania</option>
-              <option>Prezenty</option>
-              <option>Media</option>
-              <option>Podróże</option>
-              <option>Kosmetyki domowe</option>
-              <option>Inne</option>
             </select>
           </label>
           <label>Termin płatności<input id="recurring-deadline" name="payment_deadline" type="number" min="1" max="31" placeholder="np. 15" required></label>
