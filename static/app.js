@@ -55,6 +55,7 @@ const categoryOptions = [
   'Kosmetyki domowe',
   'Dziesięcina',
   'Elektronika domowa',
+  'Oszczędności',
   'Inne',
 ];
 const expenseCategory = document.querySelector('#expense-category');
