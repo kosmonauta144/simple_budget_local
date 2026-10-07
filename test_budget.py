@@ -167,6 +167,26 @@ class RecurringExpenseCategoryTests(unittest.TestCase):
         self.assertIn("2026-10", months)
         self.assertIn("2026-11", months)
 
+    def test_temporary_income_is_month_scoped_and_counted_in_savings(self):
+        with sqlite3.connect(server.DB_PATH) as connection:
+            connection.executemany(
+                "INSERT INTO temporary_incomes (name, amount, month) VALUES (?, ?, ?)",
+                [
+                    ("Premia", 5000, "2026-08"),
+                    ("Premia", 6000, "2026-09"),
+                ],
+            )
+            connection.execute(
+                "INSERT INTO incomes (name, amount, month, template_id) VALUES (?, ?, ?, ?)",
+                ("Wynagrodzenie", 45000, "2026-09", "template-income-2026-09"),
+            )
+            connection.commit()
+
+        dashboard = server.get_dashboard_data_for_month(2026, 9)
+        self.assertEqual(len(dashboard["temporary_incomes"]), 1)
+        self.assertEqual(dashboard["temporary_income_total"], 6000)
+        self.assertEqual(dashboard["income"], 51000)
+
     def test_removing_a_future_income_template_keeps_previous_months(self):
         template_id = "template-income-delete-cutoff"
         with sqlite3.connect(server.DB_PATH) as connection:

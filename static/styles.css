@@ -28,7 +28,15 @@ body:before { content: ""; position: fixed; inset: 0; opacity: .18; pointer-even
 h1 { margin: 0; font-size: clamp(3.8rem, 8vw, 7rem); line-height: .84; letter-spacing: -.06em; font-weight: 600; }
 h1 em { color: var(--coral); font-style: normal; }
 .intro-note { border-left: 2px solid var(--coral); padding-left: 14px; margin-bottom: 7px; color: var(--muted); font-size: 13px; line-height: 1.5; }
-.dashboard-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.dashboard-grid { display: grid; grid-template-columns: 1fr 1fr; grid-template-areas: "insights insights" "add total" "income recurring" "temporary recurring" "category category" "history history"; gap: 14px; }
+.add-panel { grid-area: add; }
+.total-panel { grid-area: total; }
+.monthly-income-panel { grid-area: income; }
+.recurring-panel { grid-area: recurring; }
+.temporary-income-panel { grid-area: temporary; }
+.insights-panel { grid-area: insights; }
+.category-panel { grid-area: category; }
+.history-panel { grid-area: history; }
 .panel { padding: 25px 27px; border: 1px solid var(--line); background: rgba(251,250,245,.82); min-width: 0; }
 .panel-heading { display: flex; align-items: center; gap: 14px; margin-bottom: 29px; }
 .panel-heading h2 { margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -.02em; }
@@ -68,6 +76,8 @@ select { cursor: pointer; }
 .income-note { margin: 0; color: var(--muted); font: 10px "DM Mono", monospace; line-height: 1.5; }
 .insights-panel { grid-column: 1 / -1; order: -1; }
 .insights-layout { display: grid; grid-template-columns: 180px minmax(240px, 1fr) minmax(220px, .85fr); align-items: center; gap: 34px; }
+.recurring-panel { align-self: stretch; }
+.temporary-income-panel, .monthly-income-panel { align-self: stretch; }
 .pie-chart { display: grid; place-content: center; width: 174px; aspect-ratio: 1; border-radius: 50%; background: var(--line); box-shadow: inset 0 0 0 1px rgba(32,37,33,.08); position: relative; text-align: center; }
 .pie-chart:after { content: ""; position: absolute; inset: 30%; border-radius: 50%; background: var(--panel); }
 .pie-chart span, .pie-chart small { z-index: 1; }

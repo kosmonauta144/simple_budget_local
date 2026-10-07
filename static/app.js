@@ -26,6 +26,15 @@ const recurringSubmit = document.querySelector('#recurring-submit');
 const cancelRecurring = document.querySelector('#cancel-recurring');
 const recurringMessage = document.querySelector('#recurring-message');
 let editingRecurringId = null;
+const temporaryIncomeForm = document.querySelector('#temporary-income-form');
+const temporaryIncomeName = document.querySelector('#temporary-income-name');
+const temporaryIncomeInput = document.querySelector('#temporary-income-input');
+const temporaryIncomeList = document.querySelector('#temporary-income-list');
+const temporaryIncomeTotal = document.querySelector('#temporary-income-total');
+const temporaryIncomeSubmit = document.querySelector('#temporary-income-submit');
+const cancelTemporaryIncome = document.querySelector('#cancel-temporary-income');
+const temporaryIncomeMessage = document.querySelector('#temporary-income-message');
+let editingTemporaryIncomeId = null;
 const pieChart = document.querySelector('#pie-chart');
 const chartLegend = document.querySelector('#chart-legend');
 const projectedSavings = document.querySelector('#projected-savings');
@@ -103,8 +112,8 @@ function formatDate(value) {
 
 function renderDashboard(data) {
   totalAmount.textContent = formatAmount(data.total);
-  incomeCents = data.income;
   incomeAmount.textContent = formatAmount(data.income);
+  temporaryIncomeTotal.textContent = formatAmount(data.temporary_income_total || 0);
   recurringTotal.textContent = formatAmount(data.recurring_total);
   projectedSavings.textContent = `${formatAmount(data.projected_savings)} zł`;
   projectedSavings.classList.toggle('negative', data.projected_savings < 0);
@@ -156,6 +165,13 @@ function renderDashboard(data) {
       <button class="edit-button" type="button" data-income-id="${income.id}">Edytuj</button>
       <button class="delete-button" type="button" data-income-delete="${income.id}" aria-label="Usuń przychód">×</button>
     </div>`).join('') : '<p class="empty-state">Dodaj pierwszy przychód poniżej.</p>';
+  temporaryIncomeList.innerHTML = data.temporary_incomes.length ? data.temporary_incomes.map((income) => `
+    <div class="income-row">
+      <span>${escapeHtml(income.name)}</span>
+      <strong>${formatAmount(income.amount)} zł</strong>
+      <button class="edit-button" type="button" data-temporary-income-id="${income.id}">Edytuj</button>
+      <button class="delete-button" type="button" data-temporary-income-delete="${income.id}" aria-label="Usuń jednorazowy przychód">×</button>
+    </div>`).join('') : '<p class="empty-state">Dodaj pierwszy jednorazowy przychód poniżej.</p>';
   expenseCount.textContent = data.expenses.length;
 
   if (!data.categories.length) {
@@ -216,6 +232,14 @@ incomeList.addEventListener('click', (event) => {
 
 cancelIncome.addEventListener('click', resetIncomeForm);
 
+function resetTemporaryIncomeForm() {
+  editingTemporaryIncomeId = null;
+  temporaryIncomeForm.reset();
+  temporaryIncomeSubmit.innerHTML = 'Dodaj przychód <span>↗</span>';
+  cancelTemporaryIncome.hidden = true;
+  temporaryIncomeMessage.textContent = '';
+}
+
 function resetRecurringForm() {
   editingRecurringId = null;
   recurringForm.reset();
@@ -225,6 +249,25 @@ function resetRecurringForm() {
   cancelRecurring.hidden = true;
   recurringMessage.textContent = '';
 }
+
+temporaryIncomeList.addEventListener('click', (event) => {
+  const editButton = event.target.closest('[data-temporary-income-id]');
+  const deleteButton = event.target.closest('[data-temporary-income-delete]');
+  if (editButton) {
+    const income = window.dashboardData.temporary_incomes.find((item) => String(item.id) === editButton.dataset.temporaryIncomeId);
+    editingTemporaryIncomeId = income.id;
+    temporaryIncomeName.value = income.name;
+    temporaryIncomeInput.value = (income.amount / 100).toFixed(2);
+    temporaryIncomeSubmit.innerHTML = 'Zapisz zmiany <span>↗</span>';
+    cancelTemporaryIncome.hidden = false;
+    temporaryIncomeName.focus();
+  }
+  if (deleteButton) {
+    fetch(`/api/temporary-incomes/${deleteButton.dataset.temporaryIncomeDelete}`, { method: 'DELETE' }).then((response) => response.json()).then((data) => { window.dashboardData = data; resetTemporaryIncomeForm(); renderDashboard(data); });
+  }
+});
+
+cancelTemporaryIncome.addEventListener('click', resetTemporaryIncomeForm);
 
 recurringList.addEventListener('click', (event) => {
   const editButton = event.target.closest('[data-recurring-id]');
@@ -298,6 +341,23 @@ incomeForm.addEventListener('submit', async (event) => {
   window.dashboardData = data;
   renderDashboard(data);
   resetIncomeForm();
+});
+
+temporaryIncomeForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const response = await fetch(editingTemporaryIncomeId ? `/api/temporary-incomes/${editingTemporaryIncomeId}` : '/api/temporary-incomes', {
+    method: editingTemporaryIncomeId ? 'PUT' : 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: temporaryIncomeName.value, amount: temporaryIncomeInput.value, month: getMonthString(selectedMonth) }),
+  });
+  const data = await response.json();
+  if (!response.ok) {
+    temporaryIncomeMessage.textContent = data.error;
+    return;
+  }
+  window.dashboardData = data;
+  renderDashboard(data);
+  resetTemporaryIncomeForm();
 });
 
 function escapeHtml(value) {

@@ -52,6 +52,17 @@ def initialize_database():
         )
         connection.execute(
             """
+            CREATE TABLE IF NOT EXISTS temporary_incomes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                amount INTEGER NOT NULL CHECK (amount >= 0),
+                month TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        connection.execute(
+            """
             CREATE TABLE IF NOT EXISTS recurring_expenses (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
@@ -91,6 +102,12 @@ def initialize_database():
         if "template_id" not in income_columns:
             connection.execute("ALTER TABLE incomes ADD COLUMN template_id TEXT")
         connection.execute("UPDATE incomes SET month = strftime('%Y-%m', 'now') WHERE month IS NULL OR month = ''")
+
+        temporary_columns = {row[1] for row in connection.execute("PRAGMA table_info(temporary_incomes)")}
+        if "month" not in temporary_columns:
+            connection.execute("ALTER TABLE temporary_incomes ADD COLUMN month TEXT NOT NULL DEFAULT ''")
+            connection.execute("UPDATE temporary_incomes SET month = strftime('%Y-%m', 'now') WHERE month IS NULL OR month = ''")
+        connection.execute("UPDATE temporary_incomes SET month = strftime('%Y-%m', 'now') WHERE month IS NULL OR month = ''")
 
         recurring_columns = {row[1] for row in connection.execute("PRAGMA table_info(recurring_expenses)")}
         if "category" not in recurring_columns:
@@ -274,7 +291,12 @@ def get_dashboard_data_for_month(year, month):
             "SELECT id, name, amount FROM incomes WHERE month = ? ORDER BY id ASC",
             (month_key,),
         ).fetchall()
-        income = sum(item["amount"] for item in incomes)
+        temporary_incomes = connection.execute(
+            "SELECT id, name, amount FROM temporary_incomes WHERE month = ? ORDER BY id ASC",
+            (month_key,),
+        ).fetchall()
+        income = sum(item["amount"] for item in incomes) + sum(item["amount"] for item in temporary_incomes)
+        temporary_income_total = sum(item["amount"] for item in temporary_incomes)
         recurring_expenses = connection.execute(
             "SELECT id, name, category, amount, payment_deadline, is_paid FROM recurring_expenses WHERE month = ? ORDER BY id ASC",
             (month_key,),
@@ -302,6 +324,8 @@ def get_dashboard_data_for_month(year, month):
         "total": total,
         "income": income,
         "incomes": [dict(item) for item in incomes],
+        "temporary_incomes": [dict(item) for item in temporary_incomes],
+        "temporary_income_total": temporary_income_total,
         "recurring_expenses": [dict(item) for item in recurring_expenses],
         "recurring_categories": recurring_categories_payload,
         "recurring_total": recurring_total,
@@ -426,6 +450,33 @@ class BudgetHandler(BaseHTTPRequestHandler):
             self.send_json(get_dashboard_data_for_month(year, month_number), 201)
             return
 
+        if path == "/api/temporary-incomes":
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                data = json.loads(self.rfile.read(length))
+                name = str(data.get("name", "")).strip()
+                amount = float(data.get("amount", 0))
+                month = str(data.get("month", "") or date.today().strftime("%Y-%m")).strip()
+                if len(month) != 7 or month[4] != '-':
+                    raise ValueError
+                year, month_number = map(int, month.split('-'))
+                if not 1 <= month_number <= 12:
+                    raise ValueError
+                if not name or amount <= 0:
+                    raise ValueError
+                amount_in_cents = round(amount * 100)
+            except (ValueError, TypeError, json.JSONDecodeError):
+                self.send_json({"error": "Podaj nazwę, kwotę przychodu jednorazowego większą od zera oraz poprawny miesiąc."}, 400)
+                return
+
+            with get_connection() as connection:
+                connection.execute(
+                    "INSERT INTO temporary_incomes (name, amount, month) VALUES (?, ?, ?)",
+                    (name, amount_in_cents, month),
+                )
+            self.send_json(get_dashboard_data_for_month(year, month_number), 201)
+            return
+
         if path != "/api/expenses":
             self.send_json({"error": "Not found"}, 404)
             return
@@ -504,6 +555,34 @@ class BudgetHandler(BaseHTTPRequestHandler):
                         "UPDATE recurring_expenses SET name = ?, category = ?, amount = ?, payment_deadline = ?, month = ?, is_paid = COALESCE(?, is_paid) WHERE id = ?",
                         (name, category, amount_in_cents, payment_deadline, month, is_paid, expense_id),
                     )
+            self.send_json(get_dashboard_data_for_month(year, month_number))
+            return
+
+        if path.startswith("/api/temporary-incomes/"):
+            try:
+                income_id = int(path.rsplit("/", 1)[1])
+                length = int(self.headers.get("Content-Length", 0))
+                data = json.loads(self.rfile.read(length))
+                name = str(data.get("name", "")).strip()
+                amount = float(data.get("amount", 0))
+                month = str(data.get("month", "") or date.today().strftime("%Y-%m")).strip()
+                if len(month) != 7 or month[4] != '-':
+                    raise ValueError
+                year, month_number = map(int, month.split('-'))
+                if not 1 <= month_number <= 12:
+                    raise ValueError
+                if not name or amount <= 0:
+                    raise ValueError
+                amount_in_cents = round(amount * 100)
+            except (ValueError, TypeError, json.JSONDecodeError):
+                self.send_json({"error": "Podaj nazwę, kwotę przychodu jednorazowego większą od zera oraz poprawny miesiąc."}, 400)
+                return
+
+            with get_connection() as connection:
+                connection.execute(
+                    "UPDATE temporary_incomes SET name = ?, amount = ?, month = ? WHERE id = ?",
+                    (name, amount_in_cents, month, income_id),
+                )
             self.send_json(get_dashboard_data_for_month(year, month_number))
             return
 
@@ -590,6 +669,21 @@ class BudgetHandler(BaseHTTPRequestHandler):
                     delete_future_recurring_expenses(row["template_id"], row["month"])
                 else:
                     connection.execute("DELETE FROM recurring_expenses WHERE id = ?", (expense_id,))
+            if row:
+                year, month_value = map(int, row["month"].split('-'))
+                self.send_json(get_dashboard_data_for_month(year, month_value))
+            else:
+                self.send_json(get_dashboard_data())
+            return
+        if path.startswith("/api/temporary-incomes/"):
+            try:
+                income_id = int(path.rsplit("/", 1)[1])
+            except ValueError:
+                self.send_json({"error": "Invalid temporary income id"}, 400)
+                return
+            with get_connection() as connection:
+                row = connection.execute("SELECT month FROM temporary_incomes WHERE id = ?", (income_id,)).fetchone()
+                connection.execute("DELETE FROM temporary_incomes WHERE id = ?", (income_id,))
             if row:
                 year, month_value = map(int, row["month"].split('-'))
                 self.send_json(get_dashboard_data_for_month(year, month_value))

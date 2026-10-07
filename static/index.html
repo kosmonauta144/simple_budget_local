@@ -64,7 +64,7 @@
         <p class="muted">Suma wszystkich zapisanych wydatków</p>
       </article>
 
-      <article class="panel income-panel">
+      <article class="panel income-panel monthly-income-panel">
         <div class="panel-heading">
           <span class="panel-index">04</span>
           <h2>Miesięczny przychód</h2>
@@ -122,9 +122,27 @@
           </div>
       </article>
 
-      <article class="panel category-panel">
+      <article class="panel income-panel temporary-income-panel">
         <div class="panel-heading">
           <span class="panel-index">06</span>
+          <h2>Przychody tymczasowe</h2>
+        </div>
+        <div class="income-total"><span id="temporary-income-total">0,00</span><small>PLN w tym miesiącu</small></div>
+        <div id="temporary-income-list" class="income-list"><p class="empty-state">Dodaj pierwszy jednorazowy przychód poniżej.</p></div>
+        <form id="temporary-income-form" class="income-form">
+          <label>Nazwa<input id="temporary-income-name" name="name" type="text" placeholder="np. premia" maxlength="80" required></label>
+          <label>Kwota
+            <div class="amount-input"><input id="temporary-income-input" name="amount" type="number" min="0.01" step="0.01" placeholder="0,00" required><span>PLN</span></div>
+          </label>
+          <div class="income-actions"><button id="temporary-income-submit" class="primary-button" type="submit">Dodaj przychód <span>↗</span></button><button id="cancel-temporary-income" class="cancel-button" type="button" hidden>Anuluj</button></div>
+          <p class="form-message" id="temporary-income-message" aria-live="polite"></p>
+        </form>
+        <p class="income-note">Przychody jednorazowe nie są kopiowane do kolejnych miesięcy.</p>
+      </article>
+
+      <article class="panel category-panel">
+        <div class="panel-heading">
+          <span class="panel-index">07</span>
           <h2>Według kategorii</h2>
         </div>
         <div id="category-list" class="category-list"><p class="empty-state">Brak wydatków. Dodaj pierwszy powyżej.</p></div>
@@ -132,7 +150,7 @@
 
       <article class="panel history-panel">
         <div class="panel-heading history-heading">
-          <div><span class="panel-index">07</span><h2>Ostatnie wydatki</h2></div>
+          <div><span class="panel-index">08</span><h2>Ostatnie wydatki</h2></div>
           <span id="expense-count" class="count-badge">0</span>
         </div>
         <div class="table-wrap">
