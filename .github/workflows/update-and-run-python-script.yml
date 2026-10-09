@@ -30,9 +30,8 @@ jobs:
       - name: Deploy application files
         run: |
           service_dir=/home/marabir/budget/simple_budget_local
-          sudo install -d "$service_dir/static"
-          sudo cp server.py "$service_dir/server.py"
-          sudo cp -R static/. "$service_dir/static/"
+          cp server.py "$service_dir/server.py"
+          cp -R static/. "$service_dir/static/"
 
       - name: Restart systemd service
-        run: sudo systemctl restart simple-budget.service
+        run: sudo -n /usr/bin/systemctl restart simple-budget.service
