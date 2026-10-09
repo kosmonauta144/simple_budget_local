@@ -27,9 +27,12 @@ jobs:
       - name: Check Python version
         run: python3 --version
 
-      - name: Install dependencies
+      - name: Deploy application files
         run: |
-          python3 -m pip install -r requirements.txt
+          service_dir=/home/marabir/budget/simple_budget_local
+          sudo install -d "$service_dir/static"
+          sudo cp server.py "$service_dir/server.py"
+          sudo cp -R static/. "$service_dir/static/"
 
-      - name: Run Python script
-        run: python3 server.py
+      - name: Restart systemd service
+        run: sudo systemctl restart simple-budget.service
