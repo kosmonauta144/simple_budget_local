@@ -52,6 +52,33 @@ select { cursor: pointer; }
 .primary-button:hover { background: #174f3a; transform: translateY(-2px); }
 .primary-button span { font-size: 20px; }
 .form-message { height: 15px; margin: 10px 0 0; color: var(--coral); font-size: 12px; }
+.receipt-workflow { margin-top: 27px; padding-top: 20px; border-top: 1px solid var(--line); }
+.receipt-divider { display: flex; align-items: center; gap: 12px; margin-bottom: 19px; color: var(--muted); font: 10px "DM Mono", monospace; text-transform: uppercase; }
+.receipt-divider:before, .receipt-divider:after { content: ""; height: 1px; flex: 1; background: var(--line); }
+.receipt-workflow h3, .receipt-items-heading h4 { margin: 0 0 15px; font-size: 15px; font-weight: 600; }
+.receipt-workflow > label { margin-bottom: 8px; }
+.receipt-file { margin-top: 0; padding: 8px 0; font: 12px "Space Grotesk", sans-serif; }
+.receipt-preview { display: flex; align-items: center; gap: 14px; margin-top: 13px; }
+.receipt-preview img { width: 72px; height: 88px; object-fit: cover; border: 1px solid var(--line); }
+.secondary-button { width: 100%; margin-top: 15px; border: 1px solid var(--green); padding: 11px 14px; cursor: pointer; background: transparent; color: var(--green); font: 600 13px "Space Grotesk", sans-serif; }
+.secondary-button:disabled, .primary-button:disabled { cursor: not-allowed; opacity: .48; transform: none; }
+.receipt-message { min-height: 18px; margin: 8px 0 0; color: var(--coral); font-size: 12px; line-height: 1.45; }
+.receipt-review { margin-top: 18px; padding-top: 17px; border-top: 1px solid var(--line); }
+.receipt-review > label { margin-bottom: 18px; }
+.receipt-items-heading { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin: 20px 0 9px; }
+.receipt-items-heading h4 { margin: 0; }
+.text-button { border: 0; padding: 5px 0; cursor: pointer; background: transparent; color: var(--green); font: 11px "DM Mono", monospace; text-transform: uppercase; }
+.receipt-item { display: grid; grid-template-columns: minmax(90px, 1.25fr) minmax(82px, .7fr) minmax(105px, 1fr) auto; align-items: end; gap: 10px; padding: 10px 0; border-top: 1px solid var(--line); }
+.receipt-item label { min-width: 0; margin: 0; }
+.receipt-item input, .receipt-item select { font-size: 13px; }
+.receipt-item-actions { display: flex; align-items: center; gap: 9px; padding-bottom: 7px; }
+.receipt-item-actions .delete-button { padding: 0; font: 10px "DM Mono", monospace; }
+.receipt-totals { margin-top: 12px; padding: 12px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.receipt-totals > div { display: flex; justify-content: space-between; gap: 12px; padding: 4px 0; color: var(--muted); font: 11px "DM Mono", monospace; }
+.receipt-totals strong { color: var(--ink); font-weight: 500; }
+.receipt-totals p { margin: 9px 0 0; color: var(--coral); font-size: 11px; }
+.receipt-totals p.is-matched { color: var(--green); }
+.receipt-review .primary-button { margin-top: 14px; }
 .total-panel { background: var(--green); color: white; border-color: var(--green); }
 .total-panel .panel-index { color: var(--violet); }
 .total-value { margin: 44px 0 27px; font-size: clamp(3rem, 5vw, 5.1rem); letter-spacing: -.08em; line-height: .9; white-space: nowrap; }
@@ -110,8 +137,15 @@ th, td { padding: 12px 10px; border-top: 1px solid var(--line); }
 th:first-child, td:first-child { padding-left: 0; }
 th:last-child, td:last-child { padding-right: 0; text-align: right; }
 td:nth-child(4) { color: var(--green); font-family: "DM Mono", monospace; font-size: 12px; text-align: right; }
+.receipt-summary-row { background: rgba(31,107,77,.045); }
+.receipt-summary-toggle { border: 0; padding: 3px 0; cursor: pointer; background: transparent; color: var(--green); font: 600 13px "Space Grotesk", sans-serif; text-align: left; }
+.receipt-summary-toggle:focus-visible { outline: 2px solid var(--coral); outline-offset: 3px; }
+.receipt-child-row td:first-child { padding-left: 22px; }
+.receipt-child-row[hidden] { display: none; }
 .delete-button { border: 0; padding: 4px 0 4px 12px; cursor: pointer; background: transparent; color: var(--muted); font-size: 17px; }
 .delete-button:hover { color: var(--coral); }
 .empty-state { padding: 18px 0; color: var(--muted); font-size: 12px; }
 footer { margin-top: 25px; padding-top: 16px; border-top: 1px solid var(--line); }
-@media (max-width: 700px) { .page-shell { padding: 22px 17px; } .storage-status { font-size: 8px; } .intro { display: block; padding: 70px 0 37px; } .intro-note { margin-top: 28px; } .dashboard-grid { grid-template-columns: 1fr; } .category-panel, .history-panel, .insights-panel { grid-column: auto; } .category-list { grid-template-columns: 1fr; } .income-row { grid-template-columns: 1fr auto auto auto; } .insights-layout { grid-template-columns: 1fr; gap: 22px; } .pie-chart { width: 150px; margin: 0 auto; } .chart-legend { grid-template-columns: repeat(2, 1fr); } .savings-box { border-left: 0; border-top: 1px solid var(--line); padding: 20px 0 0; } .panel { padding: 22px 20px; } footer { font-size: 8px; } }
+@media (max-width: 900px) and (min-width: 701px) { .receipt-item { grid-template-columns: 1fr 1fr; } .receipt-item-actions { justify-content: flex-end; } }
+@media (max-width: 500px) { .receipt-item { grid-template-columns: 1fr 1fr; gap: 8px 12px; } .receipt-item-actions { grid-column: 1 / -1; justify-content: flex-end; padding-bottom: 0; } .receipt-items-heading { align-items: flex-start; } }
+@media (max-width: 700px) { .page-shell { padding: 22px 17px; } .storage-status { font-size: 8px; } .intro { display: block; padding: 70px 0 37px; } .intro-note { margin-top: 28px; } .dashboard-grid { grid-template-columns: 1fr; } .category-panel, .history-panel, .insights-panel { grid-column: auto; } .category-list { grid-template-columns: 1fr; } .income-row { grid-template-columns: 1fr auto auto auto; } .insights-layout { grid-template-columns: 1fr; gap: 22px; } .pie-chart { width: 150px; margin: 0 auto; } .chart-legend { grid-template-columns: repeat(2, 1fr); } .savings-box { border-left: 0; border-top: 1px solid var(--line); padding: 20px 0 0; } .receipt-summary-toggle { max-width: 100%; overflow-wrap: anywhere; } .panel { padding: 22px 20px; } footer { font-size: 8px; } }

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="pl">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -52,6 +52,29 @@
           <button class="primary-button" type="submit">Zapisz wydatek <span>↗</span></button>
           <p class="form-message" id="form-message" aria-live="polite"></p>
         </form>
+        <section class="receipt-workflow" aria-labelledby="receipt-heading">
+          <div class="receipt-divider"><span>albo dodaj z paragonu</span></div>
+          <h3 id="receipt-heading">Zdjęcie paragonu</h3>
+          <label for="receipt-image">Wybierz lub zrób zdjęcie (JPG, PNG, WebP; maks. 8 MB)</label>
+          <input id="receipt-image" class="receipt-file" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" aria-describedby="receipt-message">
+          <div id="receipt-preview-wrap" class="receipt-preview" hidden>
+            <img id="receipt-preview" alt="Podgląd wybranego paragonu">
+            <button id="receipt-remove-image" class="cancel-button" type="button" aria-label="Usuń wybrane zdjęcie">Usuń zdjęcie</button>
+          </div>
+          <button id="receipt-analyze" class="secondary-button" type="button" disabled>Odczytaj paragon</button>
+          <p id="receipt-message" class="receipt-message" aria-live="polite" role="status"></p>
+          <div id="receipt-review" class="receipt-review" hidden>
+            <label for="receipt-date">Data paragonu<input id="receipt-date" type="date" required></label>
+            <div class="receipt-items-heading"><h4>Pozycje i podział</h4><button id="receipt-add-item" class="text-button" type="button">+ Dodaj pozycję</button></div>
+            <div id="receipt-items" class="receipt-items"></div>
+            <div class="receipt-totals" aria-live="polite">
+              <div><span>Suma paragonu</span><strong id="receipt-total">0,00 zł</strong></div>
+              <div><span>Przypisano</span><strong id="receipt-allocation-total">0,00 zł</strong></div>
+              <p id="receipt-allocation-status"></p>
+            </div>
+            <button id="receipt-confirm" class="primary-button" type="button" disabled>Zapisz wydatki z paragonu <span>↗</span></button>
+          </div>
+        </section>
       </article>
 
       <article class="panel total-panel">
