@@ -1,14 +1,143 @@
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
+from decimal import Decimal, InvalidOperation
+import base64
+import binascii
 import json
+import os
+import re
+import socket
 import sqlite3
+import urllib.error
+import urllib.request
 import uuid
 from datetime import date
 
 ROOT = Path(__file__).parent
 DB_PATH = ROOT / "budget.db"
 STATIC_PATH = ROOT / "static"
+MAX_RECEIPT_IMAGE_BYTES = 8 * 1024 * 1024
+MAX_BULK_EXPENSES = 100
+EXPENSE_CATEGORIES = (
+    "Dom",
+    "Jedzenie",
+    "Transport",
+    "Zdrowie",
+    "Rozrywka",
+    "Słodycze",
+    "Słone przekąski",
+    "Ubrania",
+    "Prezenty",
+    "Media",
+    "Podróże",
+    "Kosmetyki domowe",
+    "Dziesięcina",
+    "Elektronika domowa",
+    "Oszczędności",
+    "Inne",
+)
+
+
+def decimal_amount_to_cents(value):
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("Amount must be a decimal string")
+    try:
+        amount = Decimal(value)
+    except InvalidOperation as error:
+        raise ValueError("Amount must be a valid decimal") from error
+    if not amount.is_finite() or amount <= 0:
+        raise ValueError("Amount must be greater than zero")
+    cents = amount * 100
+    if cents != cents.to_integral_value() or cents > 9223372036854775807:
+        raise ValueError("Amount must have at most two decimal places")
+    return int(cents)
+
+
+def validate_receipt_image(image_data, mime_type):
+    if not isinstance(image_data, str) or not image_data:
+        raise ValueError("Image is required")
+    if mime_type not in ("image/jpeg", "image/png", "image/webp"):
+        raise ValueError("Unsupported image type")
+    try:
+        image_bytes = base64.b64decode(image_data, validate=True)
+    except (binascii.Error, ValueError) as error:
+        raise ValueError("Image must be valid base64") from error
+    if not image_bytes:
+        raise ValueError("Image is empty")
+    if len(image_bytes) > MAX_RECEIPT_IMAGE_BYTES:
+        raise ValueError("Image exceeds the 8 MiB limit")
+
+    signatures = {
+        "image/jpeg": image_bytes.startswith(b"\xff\xd8\xff"),
+        "image/png": image_bytes.startswith(b"\x89PNG\r\n\x1a\n"),
+        "image/webp": (
+            len(image_bytes) >= 12
+            and image_bytes.startswith(b"RIFF")
+            and image_bytes[8:12] == b"WEBP"
+        ),
+    }
+    if not signatures[mime_type]:
+        raise ValueError("Image signature does not match mime_type")
+    return image_bytes
+
+
+def validate_receipt_result(content, categories):
+    try:
+        result = json.loads(content)
+    except (TypeError, json.JSONDecodeError) as error:
+        raise ValueError("Ollama returned malformed JSON") from error
+    if not isinstance(result, dict):
+        raise ValueError("Ollama returned an invalid receipt")
+
+    receipt_date = result.get("date")
+    if not isinstance(receipt_date, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", receipt_date):
+        raise ValueError("Receipt date must use YYYY-MM-DD")
+    try:
+        date.fromisoformat(receipt_date)
+    except ValueError as error:
+        raise ValueError("Receipt date is invalid") from error
+    try:
+        total_cents = decimal_amount_to_cents(result.get("total"))
+    except ValueError as error:
+        raise ValueError("Receipt total is invalid") from error
+
+    items = result.get("items")
+    warnings = result.get("warnings")
+    if not isinstance(items, list) or not isinstance(warnings, list):
+        raise ValueError("Receipt items and warnings must be arrays")
+    validated_items = []
+    for item in items:
+        if not isinstance(item, dict):
+            raise ValueError("Receipt item is invalid")
+        name = item.get("name")
+        category = item.get("category")
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("Receipt item name is invalid")
+        if (
+            not isinstance(category, str)
+            or category not in categories
+            or category not in EXPENSE_CATEGORIES
+        ):
+            raise ValueError("Receipt item category must be a valid expense category")
+        try:
+            amount_cents = decimal_amount_to_cents(item.get("amount"))
+        except ValueError as error:
+            raise ValueError("Receipt item amount is invalid") from error
+        validated_items.append({
+            "name": name.strip(),
+            "amount": format(Decimal(amount_cents) / 100, ".2f"),
+            "category": category,
+        })
+    if any(not isinstance(warning, str) for warning in warnings):
+        raise ValueError("Receipt warnings must be strings")
+
+    return {
+        "date": receipt_date,
+        "total": format(Decimal(total_cents) / 100, ".2f"),
+        "items": validated_items,
+        "warnings": warnings,
+    }
 
 
 def get_connection():
@@ -26,7 +155,8 @@ def initialize_database():
                 name TEXT NOT NULL,
                 category TEXT NOT NULL,
                 amount INTEGER NOT NULL CHECK (amount >= 0),
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                receipt_id TEXT
             )
             """
         )
@@ -94,6 +224,8 @@ def initialize_database():
         if "expense_date" not in columns:
             connection.execute("ALTER TABLE expenses ADD COLUMN expense_date TEXT")
             connection.execute("UPDATE expenses SET expense_date = substr(created_at, 1, 10) WHERE expense_date IS NULL")
+        if "receipt_id" not in columns:
+            connection.execute("ALTER TABLE expenses ADD COLUMN receipt_id TEXT")
 
         income_columns = {row[1] for row in connection.execute("PRAGMA table_info(incomes)")}
         if "month" not in income_columns:
@@ -269,7 +401,7 @@ def get_dashboard_data_for_month(year, month):
 
     with get_connection() as connection:
         expenses = connection.execute(
-            "SELECT id, name, category, amount, expense_date, created_at FROM expenses WHERE expense_date >= ? AND expense_date < ? ORDER BY expense_date DESC, id DESC",
+            "SELECT id, name, category, amount, expense_date, created_at, receipt_id FROM expenses WHERE expense_date >= ? AND expense_date < ? ORDER BY expense_date DESC, id DESC",
             (str(month_start), str(month_end))
         ).fetchall()
         categories = connection.execute(
@@ -385,6 +517,170 @@ class BudgetHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = urlparse(self.path).path
+        if path == "/api/receipts/analyze":
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                max_request_size = ((MAX_RECEIPT_IMAGE_BYTES + 2) // 3) * 4 + 65536
+                if length <= 0 or length > max_request_size:
+                    raise ValueError("Request body is empty or too large")
+                data = json.loads(self.rfile.read(length))
+                if not isinstance(data, dict):
+                    raise ValueError("JSON object required")
+                categories = data.get("categories")
+                if (
+                    not isinstance(categories, list)
+                    or not categories
+                    or any(not isinstance(category, str) or not category.strip() for category in categories)
+                ):
+                    raise ValueError("Provide existing categories")
+                image_bytes = validate_receipt_image(data.get("image"), data.get("mime_type"))
+            except (ValueError, TypeError, json.JSONDecodeError) as error:
+                self.send_json({"error": str(error) or "Invalid receipt request"}, 400)
+                return
+
+            prompt = (
+                "Read this receipt and return only JSON with this shape: "
+                '{"date":"YYYY-MM-DD","total":"decimal","items":[{"name":"...",'
+                '"amount":"decimal","category":"one provided category"}],"warnings":[]}. '
+                "Use only these categories: " + json.dumps(categories, ensure_ascii=False)
+            )
+            allowed_categories = [
+                category for category in categories if category in EXPENSE_CATEGORIES
+            ]
+            receipt_schema = {
+                "type": "object",
+                "properties": {
+                    "date": {
+                        "type": "string",
+                        "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                    },
+                    "total": {
+                        "type": "string",
+                        "pattern": "^[0-9]+(?:\\.[0-9]{1,2})?$",
+                    },
+                    "items": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "name": {"type": "string", "minLength": 1},
+                                "amount": {
+                                    "type": "string",
+                                    "pattern": "^[0-9]+(?:\\.[0-9]{1,2})?$",
+                                },
+                                "category": {
+                                    "type": "string",
+                                    "enum": allowed_categories,
+                                },
+                            },
+                            "required": ["name", "amount", "category"],
+                            "additionalProperties": False,
+                        },
+                    },
+                    "warnings": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["date", "total", "items", "warnings"],
+                "additionalProperties": False,
+            }
+            ollama_payload = json.dumps({
+                "model": os.environ.get("OLLAMA_VISION_MODEL", "gemma3:4b"),
+                "stream": False,
+                "format": receipt_schema,
+                "options": {"temperature": 0},
+                "messages": [{
+                    "role": "user",
+                    "content": prompt,
+                    "images": [base64.b64encode(image_bytes).decode("ascii")],
+                }],
+            }).encode("utf-8")
+            ollama_url = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/") + "/api/chat"
+            request = urllib.request.Request(
+                ollama_url,
+                data=ollama_payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(request, timeout=60) as response:
+                    ollama_response = json.loads(response.read())
+            except (socket.timeout, TimeoutError):
+                self.send_json({"error": "Ollama request timed out"}, 504)
+                return
+            except urllib.error.HTTPError as error:
+                if error.code == 404:
+                    message = "Vision model not found; check OLLAMA_VISION_MODEL and pull the model locally"
+                else:
+                    message = "Ollama returned an HTTP error"
+                self.send_json({"error": message}, 502)
+                return
+            except urllib.error.URLError as error:
+                if isinstance(error.reason, (socket.timeout, TimeoutError)):
+                    self.send_json({"error": "Ollama request timed out"}, 504)
+                    return
+                self.send_json({"error": "Ollama is unavailable; check that the local service is running"}, 503)
+                return
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                self.send_json({"error": "Ollama returned an invalid response"}, 502)
+                return
+
+            try:
+                content = ollama_response["message"]["content"]
+                result = validate_receipt_result(content, categories)
+            except (KeyError, TypeError, ValueError) as error:
+                self.send_json({"error": str(error) or "Ollama returned an invalid receipt"}, 502)
+                return
+            self.send_json(result)
+            return
+
+        if path == "/api/expenses/bulk":
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                if length <= 0 or length > 1024 * 1024:
+                    raise ValueError("Request body is empty or too large")
+                data = json.loads(self.rfile.read(length))
+                expenses = data.get("expenses") if isinstance(data, dict) else None
+                if not isinstance(expenses, list) or not 1 <= len(expenses) <= MAX_BULK_EXPENSES:
+                    raise ValueError(f"Provide between 1 and {MAX_BULK_EXPENSES} expenses")
+
+                validated_expenses = []
+                receipt_date = None
+                for expense in expenses:
+                    if not isinstance(expense, dict):
+                        raise ValueError("Each expense must be an object")
+                    name = expense.get("name")
+                    category = expense.get("category")
+                    expense_date = expense.get("date")
+                    if not isinstance(name, str) or not name.strip():
+                        raise ValueError("Each expense requires a name")
+                    if not isinstance(category, str) or category.strip() not in EXPENSE_CATEGORIES:
+                        raise ValueError("Each expense requires a valid category")
+                    if not isinstance(expense_date, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", expense_date):
+                        raise ValueError("Each expense date must use YYYY-MM-DD")
+                    date.fromisoformat(expense_date)
+                    if receipt_date is None:
+                        receipt_date = expense_date
+                    elif expense_date != receipt_date:
+                        raise ValueError("All expenses must have the same receipt date")
+                    amount_in_cents = decimal_amount_to_cents(expense.get("amount"))
+                    validated_expenses.append((name.strip(), category.strip(), amount_in_cents, expense_date))
+            except (ValueError, TypeError, json.JSONDecodeError) as error:
+                self.send_json({"error": str(error) or "Invalid bulk expense request"}, 400)
+                return
+
+            receipt_id = str(uuid.uuid4())
+            with get_connection() as connection:
+                created_ids = []
+                for expense in validated_expenses:
+                    cursor = connection.execute(
+                        "INSERT INTO expenses (name, category, amount, expense_date, receipt_id) VALUES (?, ?, ?, ?, ?)",
+                        (*expense, receipt_id),
+                    )
+                    created_ids.append(cursor.lastrowid)
+            receipt_day = date.fromisoformat(receipt_date)
+            dashboard = get_dashboard_data_for_month(receipt_day.year, receipt_day.month)
+            self.send_json({"created_ids": created_ids, "dashboard": dashboard}, 201)
+            return
+
         if path == "/api/recurring-expenses":
             try:
                 length = int(self.headers.get("Content-Length", 0))
